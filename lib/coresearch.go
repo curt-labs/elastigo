@@ -117,18 +117,17 @@ func (c *Conn) SearchUri(index, _type string, args map[string]interface{}) (Sear
 	} else {
 		uriVal = fmt.Sprintf("/%s/_search", index)
 	}
-	//log.Println(uriVal)
 	body, err := c.DoCommand("GET", uriVal, args, nil)
 	if err != nil {
 		return retval, err
 	}
-	if err == nil {
-		// marshall into json
-		jsonErr := json.Unmarshal([]byte(body), &retval)
-		if jsonErr != nil {
-			return retval, jsonErr
-		}
+
+	// marshall into json
+	jsonErr := json.Unmarshal([]byte(body), &retval)
+	if jsonErr != nil {
+		return retval, jsonErr
 	}
+
 	retval.RawJSON = body
 	return retval, err
 }

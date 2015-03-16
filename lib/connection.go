@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"fmt"
 	hostpool "github.com/bitly/go-hostpool"
-	"log"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -120,7 +119,6 @@ func (c *Conn) initializeHostPool() {
 
 			res, err := client.Do(req)
 			if err != nil {
-				log.Println(err)
 				return err
 			}
 			defer res.Body.Close()
@@ -177,6 +175,7 @@ func (c *Conn) NewRequest(method, path, query string) (*Request, error) {
 		qs.Add("token", c.Token)
 		uri = fmt.Sprintf("%s://%s:%s%s?%s", c.Protocol, host, portNum, path, qs.Encode())
 	} else {
+		path = strings.Replace(path, "?", "", -1)
 		uri = fmt.Sprintf("%s://%s:%s%s?token=%s", c.Protocol, host, portNum, path, c.Token)
 	}
 	req, err := http.NewRequest(method, uri, nil)

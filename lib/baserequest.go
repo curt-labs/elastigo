@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"time"
 )
 
@@ -28,6 +27,7 @@ func (c *Conn) DoCommand(method string, url string, args map[string]interface{},
 	if err != nil {
 		return nil, err
 	}
+
 	req, err := c.NewRequest(method, url, query)
 	if err != nil {
 		return body, err
@@ -54,6 +54,7 @@ func (c *Conn) DoCommand(method string, url string, args map[string]interface{},
 	if err != nil {
 		return body, err
 	}
+
 	if httpStatusCode > 304 {
 
 		jsonErr := json.Unmarshal(body, &response)
@@ -84,7 +85,6 @@ func (e ESError) Error() string {
 // returning nothing
 func (c *Conn) Exists(index string, _type string, id string, args map[string]interface{}) (BaseResponse, error) {
 	var response map[string]interface{}
-	var body []byte
 	var url string
 	var retval BaseResponse
 	var httpStatusCode int
@@ -99,22 +99,20 @@ func (c *Conn) Exists(index string, _type string, id string, args map[string]int
 	} else {
 		url = fmt.Sprintf("/%s/%s", index, id)
 	}
-	req, err := c.NewRequest("HEAD", url, query)
+
+	req, err := c.NewRequest("GET", url, query)
 	if err != nil {
-		// some sort of generic error handler
-	}
-	httpStatusCode, body, err = req.Do(&response)
-	if httpStatusCode > 304 {
-		if error, ok := response["error"]; ok {
+		if res_err, ok := response["error"]; ok {
 			status, _ := response["status"]
-			log.Printf("Error: %v (%v)\n", error, status)
+			return retval, ESError{time.Now(), fmt.Sprintf("Error [%s] Status [%v]", res_err, status), httpStatusCode}
 		}
+	}
+
+	httpStatusCode, _, err = req.Do(&response)
+	if httpStatusCode == 200 {
+		retval.Exists = true
 	} else {
-		// marshall into json
-		jsonErr := json.Unmarshal(body, &retval)
-		if jsonErr != nil {
-			log.Println(jsonErr)
-		}
+		retval.Exists = false
 	}
 	return retval, err
 }
