@@ -12,9 +12,13 @@
 package elastigo
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	hostpool "github.com/bitly/go-hostpool"
+	"log"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"sync"
@@ -39,6 +43,7 @@ type Conn struct {
 	Username       string
 	Password       string
 	Hosts          []string
+	Token          string
 	hp             hostpool.HostPool
 	once           sync.Once
 
@@ -47,6 +52,16 @@ type Conn struct {
 	// value of 5 minutes. The EpsilonValueCalculator uses this to calculate a score
 	// from the weighted average response time.
 	DecayDuration time.Duration
+}
+
+type AuthRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type AuthResult struct {
+	Status int    `json:"status"`
+	Token  string `json:"token"`
 }
 
 func NewConn() *Conn {
@@ -61,7 +76,7 @@ func NewConn() *Conn {
 }
 
 func (c *Conn) SetPort(port string) {
-    c.Port = port
+	c.Port = port
 }
 
 func (c *Conn) SetHosts(newhosts []string) {
@@ -80,6 +95,48 @@ func (c *Conn) initializeHostPool() {
 	// If no hosts are set, fallback to defaults
 	if len(c.Hosts) == 0 {
 		c.Hosts = append(c.Hosts, fmt.Sprintf("%s:%s", c.Domain, c.Port))
+	}
+
+	if c.Username != "" && c.Password != "" {
+		func() error {
+
+			js, err := json.Marshal(AuthRequest{c.Username, c.Password})
+			if err != nil {
+				return err
+			}
+
+			url_ := "http://127.0.0.1:9200"
+			if len(c.Hosts) > 0 {
+				url_ = "http://" + c.Hosts[0] + "/login"
+			}
+
+			req, err := http.NewRequest("POST", url_, bytes.NewBuffer(js))
+			if err != nil {
+				return err
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			client := http.Client{}
+
+			res, err := client.Do(req)
+			if err != nil {
+				log.Println(err)
+				return err
+			}
+			defer res.Body.Close()
+
+			ret := new(AuthResult)
+			if err := json.NewDecoder(res.Body).Decode(ret); err != nil {
+				return err
+			}
+
+			c.Token = ret.Token
+			if c.Token == "" {
+				return err
+			}
+
+			return nil
+		}()
 	}
 
 	// Epsilon Greedy is an algorithm that allows HostPool not only to
@@ -111,10 +168,16 @@ func (c *Conn) NewRequest(method, path, query string) (*Request, error) {
 	var uri string
 	// If query parameters are provided, the add them to the URL,
 	// otherwise, leave them out
+
 	if len(query) > 0 {
-		uri = fmt.Sprintf("%s://%s:%s%s?%s", c.Protocol, host, portNum, path, query)
+		qs, err := url.ParseQuery(query)
+		if err != nil {
+			return nil, err
+		}
+		qs.Add("token", c.Token)
+		uri = fmt.Sprintf("%s://%s:%s%s?%s", c.Protocol, host, portNum, path, qs.Encode())
 	} else {
-		uri = fmt.Sprintf("%s://%s:%s%s", c.Protocol, host, portNum, path)
+		uri = fmt.Sprintf("%s://%s:%s%s?token=%s", c.Protocol, host, portNum, path, c.Token)
 	}
 	req, err := http.NewRequest(method, uri, nil)
 	if err != nil {
@@ -122,10 +185,6 @@ func (c *Conn) NewRequest(method, path, query string) (*Request, error) {
 	}
 	req.Header.Add("Accept", "application/json")
 	req.Header.Add("User-Agent", "elasticSearch/"+Version+" ("+runtime.GOOS+"-"+runtime.GOARCH+")")
-
-	if c.Username != "" || c.Password != "" {
-		req.SetBasicAuth(c.Username, c.Password)
-	}
 
 	newRequest := &Request{
 		Request:      req,
